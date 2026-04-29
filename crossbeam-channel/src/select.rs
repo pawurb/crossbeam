@@ -210,6 +210,21 @@ fn run_select(
         }
     }
 
+    // Pre-park spin with backoff. Mirrors `flavors::list::Channel::recv` and
+    // `run_ready`: avoids the mutex + park/unpark round-trip when an operation
+    // is about to become ready. Skipped for `Timeout::Now` (`try_select`).
+    if !matches!(timeout, Timeout::Now) {
+        let backoff = Backoff::new();
+        while !backoff.is_completed() {
+            backoff.snooze();
+            for &(handle, i, addr) in handles.iter() {
+                if handle.try_select(&mut token) {
+                    return Some((token, i, addr));
+                }
+            }
+        }
+    }
+
     loop {
         // Prepare for blocking.
         let res = Context::with(|cx| {
